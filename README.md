@@ -1,4 +1,4 @@
-# Text Based RPG
+# Text Based RPG- Unfinished
 
 A simple turn-based RPG game written in C++. Players and enemies take turns using abilities, applying status effects, and managing HP. The game is played in the terminal and features a party system, abilities, and status effects.
 
