@@ -1,3 +1,4 @@
+#include "raylib.h"
 #include <iostream>
 #include <vector>
 #include <cstdlib>
@@ -6,44 +7,65 @@
 #include <iomanip>
 #include "Standmember.hpp"
 #include "BattleSystem.hpp"
-#include "testutils.hpp"
-#include "party.hpp"
+#include "StatBlock.hpp"
+#include "Ability.hpp"
+#include "Party.hpp"
 
-
-
-
-void printAbilities(const StandMember& member) {
-    const auto& abilities = member.getAbilities();
-    std::cout << "+---------------------------+\n";
-    std::cout << "|         ATTACKS          |\n";
-    std::cout << "+---------------------------+\n";
-    for (size_t i = 0; i < abilities.size(); ++i) {
-        std::cout << "| " << std::setw(2) << i << ": " << std::setw(20) << std::left << abilities[i].name;
-        if (abilities[i].type == AbilityType::Buff)
-            std::cout << " (Buff)    |\n";
-        else if (abilities[i].type == AbilityType::Debuff)
-            std::cout << " (Debuff)  |\n";
-        else if (abilities[i].type == AbilityType::Ultimate)
-            std::cout << " (Ultimate)|\n";
-        else
-            std::cout << " (Normal)  |\n";
-    }
-    std::cout << "+---------------------------+\n";
+void createTestAbilities(std::vector<std::vector<Ability>>& allAbilities) {
+    allAbilities = {
+        {
+            {"Pulse Jab", AbilityType::Normal, 10, StatusEffect::None, 0},
+            {"Breaker Shout", AbilityType::Normal, 15, StatusEffect::Stun, 20},
+            {"Echo Drive", AbilityType::Normal, 12, StatusEffect::None, 0},
+            {"Crimson Riot", AbilityType::Buff, 0, StatusEffect::None, 0},
+            {"Mute Anthem", AbilityType::Debuff, 0, StatusEffect::Silence, 40},
+            {"Final Reverb", AbilityType::Ultimate, 30, StatusEffect::Stun, 50}
+        },
+        {
+            {"Thread Bite", AbilityType::Normal, 8, StatusEffect::Poison, 40},
+            {"Iron Snap", AbilityType::Normal, 10, StatusEffect::None, 0},
+            {"Web Crush", AbilityType::Normal, 14, StatusEffect::Stun, 25},
+            {"Stone Guard", AbilityType::Buff, 0, StatusEffect::None, 0},
+            {"Trap Thread", AbilityType::Debuff, 0, StatusEffect::Stun, 50},
+            {"Widow's Bloom", AbilityType::Ultimate, 28, StatusEffect::Silence, 40}
+        },
+        {
+            {"Tempo Cut", AbilityType::Normal, 10, StatusEffect::None, 0},
+            {"Flash Fade", AbilityType::Normal, 12, StatusEffect::None, 0},
+            {"Discharge Spiral", AbilityType::Normal, 14, StatusEffect::Stun, 30},
+            {"Quickstep Sync", AbilityType::Buff, 0, StatusEffect::None, 0},
+            {"Rust Tempo", AbilityType::Debuff, 0, StatusEffect::Silence, 50},
+            {"Storm Encore", AbilityType::Ultimate, 25, StatusEffect::Poison, 30}
+        }
+    };
 }
 
-
-void printEnemyTargets(const Party& enemyParty) {
-    std::cout << "\n+---------------------- Targets ----------------------+\n";
-    for (size_t i = 0; i < enemyParty.size(); ++i) {
-        const auto& target = enemyParty.getMember(i);
-        std::cout << "| " << i << ": " << std::setw(15) << target.getName()
-                  << " HP: " << target.getHP().getHP() << (target.isAlive() ? "     |\n" : " (KO'd) |\n");
+StandMember createMember(const std::string& name, StandType type, int hpVal, int atk, int def, int spd, const std::vector<Ability>& abilities) {
+    StatBlock stats = {static_cast<ui8>(atk), static_cast<ui8>(def), static_cast<ui8>(spd), 10, 10, 10};
+    hp myHP(hpVal, hpVal, 0);
+    StandMember member(name, type, myHP, stats);
+    for (const auto& ab : abilities) {
+        member.addAbility(ab);
     }
-    std::cout << "+-----------------------------------------------------+\n";
+    return member;
 }
 
 int main() {
-    srand(time(0));
+    InitWindow(800, 600, "Overworld + Battle Demo");
+    SetTargetFPS(60);
+
+    Texture2D playerTex = LoadTexture("player.png");
+    Texture2D enemyTex = LoadTexture("enemy.png");
+
+    Rectangle playerRect = {100.0f, 100.0f, 32.0f, 32.0f};
+    Rectangle enemyRect = {500.0f, 300.0f, 32.0f, 32.0f};
+    float speed = 2.0f;
+
+    bool inBattle = false;
+    int turn = 1;
+    int selectedAbility = -1;
+    int selectedTarget = -1;
+    int currentPlayer = 0;
 
     std::vector<std::vector<Ability>> allAbilities;
     createTestAbilities(allAbilities);
@@ -58,62 +80,90 @@ int main() {
     enemyParty.addMember(createMember("Granite Echo", StandType::Defense, 130, 13, 18, 6, allAbilities[0]));
     enemyParty.addMember(createMember("Shock Tempo", StandType::Speed, 95, 17, 10, 22, allAbilities[2]));
 
-    int turn = 1;
-    while (!playerParty.isDefeated() && !enemyParty.isDefeated()) {
-        std::cout << "\n--- Turn " << turn << " ---\n";
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
 
-        for (int i = 0; i < playerParty.size(); ++i) {
-            auto& attacker = playerParty.getMember(i);
-            if (!attacker.isAlive()) continue;
+        if (!inBattle) {
+            if (IsKeyDown(KEY_RIGHT)) playerRect.x += speed;
+            if (IsKeyDown(KEY_LEFT)) playerRect.x -= speed;
+            if (IsKeyDown(KEY_UP)) playerRect.y -= speed;
+            if (IsKeyDown(KEY_DOWN)) playerRect.y += speed;
 
-            std::cout << "\nChoose attack for " << attacker.getName() << ":\n";
-            printAbilities(attacker);
+            DrawTextureRec(playerTex, Rectangle{0,0,64,64}, Vector2{playerRect.x, playerRect.y}, WHITE);
+            DrawTextureRec(enemyTex, Rectangle{0,0,64,64}, Vector2{enemyRect.x, enemyRect.y}, WHITE);
 
-            int abilityChoice;
-            std::cout << "Enter ability index (0-5): ";
-            std::cin >> abilityChoice;
-            if (std::cin.fail() || abilityChoice < 0 || abilityChoice >= attacker.getAbilities().size()) {
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                std::cout << "Invalid choice! Skipping turn.\n";
-                continue;
+            if (CheckCollisionRecs(playerRect, enemyRect)) {
+                inBattle = true;
             }
+        } else if (!playerParty.isDefeated() && !enemyParty.isDefeated()) {
+            DrawText(TextFormat("Turn %d", turn), 10, 10, 20, BLACK);
 
-            printEnemyTargets(enemyParty);
-            int targetIndex;
-            std::cout << "Select target index: ";
-            std::cin >> targetIndex;
-            if (std::cin.fail() || targetIndex < 0 || targetIndex >= enemyParty.size() || !enemyParty.getMember(targetIndex).isAlive()) {
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                std::cout << "Invalid target! Skipping turn.\n";
-                continue;
+            if (currentPlayer < playerParty.size()) {
+                StandMember& attacker = playerParty.getMember(currentPlayer);
+                if (attacker.isAlive()) {
+                    DrawText(TextFormat("Choose attack for %s", attacker.getName().c_str()), 10, 40, 20, DARKBLUE);
+
+                    for (int i = 0; i < attacker.getAbilities().size(); i++) {
+                        DrawRectangle(10, 70 + i * 40, 300, 30, LIGHTGRAY);
+                        DrawText(TextFormat("%d: %s", i, attacker.getAbility(i).name.c_str()), 15, 75 + i * 40, 18, BLACK);
+                        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                            Vector2 mouse = GetMousePosition();
+                            Rectangle rect = {10.0f, 70.0f + static_cast<float>(i) * 40.0f, 300.0f, 30.0f};
+                                if (CheckCollisionPointRec(mouse, rect)) {
+                                    selectedAbility = i;
+                                }
+                        }
+                    }
+
+                    if (selectedAbility != -1) {
+                        DrawText("Choose a target:", 350, 40, 20, MAROON);
+                        int targetY = 70;
+                        for (int i = 0; i < enemyParty.size(); ++i) {
+                            if (!enemyParty.getMember(i).isAlive()) continue;
+                            DrawRectangle(350, targetY, 300, 30, LIGHTGRAY);
+                            DrawText(TextFormat("%d: %s (HP: %d)", i, enemyParty.getMember(i).getName().c_str(), enemyParty.getMember(i).getHP().getHP()), 355, targetY + 5, 18, BLACK);
+                            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                                Vector2 mouse = GetMousePosition();
+                                if (CheckCollisionPointRec(mouse, Rectangle{350, (float)targetY, 300, 30})) {
+                                    selectedTarget = i;
+                                }
+                            }
+                            targetY += 40;
+                        }
+
+                        if (selectedTarget != -1) {
+                            StandMember& target = enemyParty.getMember(selectedTarget);
+                            const Ability& ab = attacker.getAbility(selectedAbility);
+                            BattleSystem::useAbility(attacker, target, ab);
+                            selectedAbility = -1;
+                            selectedTarget = -1;
+                            currentPlayer++;
+                        }
+                    }
+                } else {
+                    currentPlayer++;
+                }
+            } else {
+                for (int i = 0; i < enemyParty.size(); ++i) {
+                    auto& attacker = enemyParty.getMember(i);
+                    if (!attacker.isAlive()) continue;
+                    auto& target = playerParty.getFirstAlive();
+                    const Ability& ab = attacker.getAbility(rand() % attacker.getAbilities().size());
+                    BattleSystem::useAbility(attacker, target, ab);
+                }
+                playerParty.updateAllStatusEffects();
+                enemyParty.updateAllStatusEffects();
+                currentPlayer = 0;
+                turn++;
             }
-
-            auto& target = enemyParty.getMember(targetIndex);
-            const Ability& ab = attacker.getAbility(abilityChoice);
-            BattleSystem::useAbility(attacker, target, ab);
+        } else {
+            DrawText("Battle Over!", 300, 280, 30, DARKGRAY);
         }
 
-        for (int i = 0; i < enemyParty.size(); ++i) {
-            auto& attacker = enemyParty.getMember(i);
-            if (!attacker.isAlive()) continue;
-            auto& target = playerParty.getFirstAlive();
-            const Ability& ab = attacker.getAbility(rand() % attacker.getAbilities().size());
-            BattleSystem::useAbility(attacker, target, ab);
-        }
-
-        playerParty.updateAllStatusEffects();
-        enemyParty.updateAllStatusEffects();
-
-        ++turn;
+        EndDrawing();
     }
 
-    std::cout << "\n\n====== BATTLE RESULT ======\n";
-    if (playerParty.isDefeated())
-        std::cout << "You lost the battle...\n";
-    else
-        std::cout << "You won the battle!\n";
-
+    CloseWindow();
     return 0;
 }
